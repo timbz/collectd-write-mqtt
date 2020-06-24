@@ -97,7 +97,7 @@ static int wm_publish_nolock(wm_callback_t *cb, char const *data) /* {{{ */
   }
 
   status = mosquitto_publish(cb->mosq, /* message_id */ NULL, cb->topic,
-                             (int)strlen(data) + 1, data,
+                             (int)strlen(data), data,
                              cb->qos, /* retain */ false);
   if (status != MOSQ_ERR_SUCCESS) {
     char errbuf[1024];
@@ -133,7 +133,7 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
     client_id = hostname_g;
 
   cb->mosq =
-      mosquitto_new(client_id, true, /* user data = */ cb);
+      mosquitto_new(client_id, /* clean session */ true, /* user data */ cb);
   if (cb->mosq == NULL) {
     ERROR("write_mqtt plugin: mosquitto_new failed");
     return (-1);
@@ -177,6 +177,19 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
   }
 
   cb->connected = 1;
+
+  status = mosquitto_loop_start(cb->mosq);
+  if (status != MOSQ_ERR_SUCCESS) {
+    char errbuf[1024];
+    ERROR("write_mqtt plugin: mosquitto_loop_start failed: %s",
+          (status == MOSQ_ERR_ERRNO) ? sstrerror(errno, errbuf, sizeof(errbuf))
+                                     : mosquitto_strerror(status));
+    mosquitto_disconnect(cb->mosq);
+    cb->connected = 1;
+    mosquitto_destroy(cb->mosq);
+    cb->mosq = NULL;
+    return (-1);
+  }
 
   wm_reset_buffer(cb);
 
@@ -261,6 +274,8 @@ static void wm_callback_free(void *data) /* {{{ */
     if (cb->connected)
       (void)mosquitto_disconnect(cb->mosq);
     cb->connected = 0;
+
+    (void)mosquitto_loop_stop(cb->mosq, false);
 
     (void)mosquitto_destroy(cb->mosq);
   }
@@ -472,12 +487,19 @@ static int wm_config(oconfig_item_t *ci) /* {{{ */
 
 static int wm_init(void) /* {{{ */
 {
-    mosquitto_lib_init();
+  mosquitto_lib_init();
   return (0);
 } /* }}} int wm_init */
+
+static int wm_shutdown(void) /* {{{ */
+{
+  mosquitto_lib_cleanup();
+  return (0);
+} /* }}} int wm_shutdown */
 
 void module_register(void) /* {{{ */
 {
   plugin_register_complex_config("write_mqtt", wm_config);
   plugin_register_init("write_mqtt", wm_init);
+  plugin_register_shutdown ("write_mqtt", wm_shutdown);
 } /* }}} void module_register */
