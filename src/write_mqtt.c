@@ -75,6 +75,15 @@ static int wm_mqtt_reconnect(wm_callback_t *cb) {
                                      : mosquitto_strerror(status));
     return (-1);
   }
+  status = mosquitto_loop_start(cb->mosq);
+  if (status != MOSQ_ERR_SUCCESS) {
+    char errbuf[1024];
+    ERROR("write_mqtt plugin: mosquitto_loop_start failed: %s",
+          (status == MOSQ_ERR_ERRNO) ? sstrerror(errno, errbuf, sizeof(errbuf))
+                                     : mosquitto_strerror(status));
+    (void)mosquitto_disconnect(cb->mosq);
+    return (-1);
+  }
 
   cb->connected = 1;
 
@@ -110,7 +119,8 @@ static int wm_publish_nolock(wm_callback_t *cb, char const *data) /* {{{ */
      * measure; we will try to reconnect the next time we have to publish a
      * message */
     cb->connected = 0;
-    mosquitto_disconnect(cb->mosq);
+    (void)mosquitto_disconnect(cb->mosq);
+    (void)mosquitto_loop_stop(cb->mosq, false);
 
     return (-1);
   }
@@ -176,20 +186,19 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
     return (-1);
   }
 
-  cb->connected = 1;
-
   status = mosquitto_loop_start(cb->mosq);
   if (status != MOSQ_ERR_SUCCESS) {
     char errbuf[1024];
     ERROR("write_mqtt plugin: mosquitto_loop_start failed: %s",
           (status == MOSQ_ERR_ERRNO) ? sstrerror(errno, errbuf, sizeof(errbuf))
                                      : mosquitto_strerror(status));
-    mosquitto_disconnect(cb->mosq);
-    cb->connected = 1;
+    (void)mosquitto_disconnect(cb->mosq);
     mosquitto_destroy(cb->mosq);
     cb->mosq = NULL;
     return (-1);
   }
+
+  cb->connected = 1;
 
   wm_reset_buffer(cb);
 
