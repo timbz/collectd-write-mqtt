@@ -1,9 +1,9 @@
 #include "collectd.h"
 
-#include "common.h"
 #include "plugin.h"
 #include "utils_complain.h"
-#include "utils_format_json.h"
+#include "utils/common/common.h"
+#include "utils/format_json/format_json.h"
 
 #include <mosquitto.h>
 
@@ -20,7 +20,7 @@ struct wm_callback_s {
   char *name;
 
   struct mosquitto *mosq;
-  _Bool connected;
+  bool connected;
 
   char *host;
   int port;
@@ -28,12 +28,12 @@ struct wm_callback_s {
   char *capath;
   char *clientkey;
   char *clientcert;
-  _Bool insecure;
+  bool insecure;
   int protocol_version;
   int qos;
   char *topic;
 
-  _Bool store_rates;
+  bool store_rates;
 
   char *send_buffer;
   size_t send_buffer_size;
@@ -65,7 +65,7 @@ static int wm_mqtt_reconnect(wm_callback_t *cb) {
   int status;
 
   if (cb->connected)
-    return (0);
+    return 0;
 
   status = mosquitto_reconnect(cb->mosq);
   if (status != MOSQ_ERR_SUCCESS) {
@@ -73,7 +73,7 @@ static int wm_mqtt_reconnect(wm_callback_t *cb) {
     ERROR("wm_mqtt_reconnect: mosquitto_reconnect failed: %s",
           (status == MOSQ_ERR_ERRNO) ? sstrerror(errno, errbuf, sizeof(errbuf))
                                      : mosquitto_strerror(status));
-    return (-1);
+    return -1;
   }
   status = mosquitto_loop_start(cb->mosq);
   if (status != MOSQ_ERR_SUCCESS) {
@@ -82,7 +82,7 @@ static int wm_mqtt_reconnect(wm_callback_t *cb) {
           (status == MOSQ_ERR_ERRNO) ? sstrerror(errno, errbuf, sizeof(errbuf))
                                      : mosquitto_strerror(status));
     (void)mosquitto_disconnect(cb->mosq);
-    return (-1);
+    return -1;
   }
 
   cb->connected = 1;
@@ -91,7 +91,7 @@ static int wm_mqtt_reconnect(wm_callback_t *cb) {
             "write_mqtt plugin: successfully reconnected to broker \"%s:%d\"",
             cb->host, cb->port);
 
-  return (0);
+  return 0;
 } /* wm_mqtt_reconnect */
 
 /* must hold cb->send_lock when calling */
@@ -102,7 +102,7 @@ static int wm_publish_nolock(wm_callback_t *cb, char const *data) /* {{{ */
   status = wm_mqtt_reconnect(cb);
   if (status != 0) {
     ERROR("write_mqtt plugin: unable to reconnect to broker");
-    return (status);
+    return status;
   }
 
   status = mosquitto_publish(cb->mosq, /* message_id */ NULL, cb->topic,
@@ -122,10 +122,10 @@ static int wm_publish_nolock(wm_callback_t *cb, char const *data) /* {{{ */
     (void)mosquitto_disconnect(cb->mosq);
     (void)mosquitto_loop_stop(cb->mosq, false);
 
-    return (-1);
+    return -1;
   }
 
-  return (0);
+  return 0;
 } /* }}} wm_publish_nolock */
 
 /* must hold cb->send_lock when calling. */
@@ -135,7 +135,7 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
   int status;
 
   if (cb->mosq != NULL)
-    return (0);
+    return 0;
 
   if (cb->client_id)
     client_id = cb->client_id;
@@ -146,7 +146,7 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
       mosquitto_new(client_id, /* clean session */ true, /* user data */ cb);
   if (cb->mosq == NULL) {
     ERROR("write_mqtt plugin: mosquitto_new failed");
-    return (-1);
+    return -1;
   }
 
   mosquitto_opts_set(cb->mosq, MOSQ_OPT_PROTOCOL_VERSION, &cb->protocol_version);
@@ -160,7 +160,7 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
             mosquitto_strerror(status));
       mosquitto_destroy(cb->mosq);
       cb->mosq = NULL;
-      return (-1);
+      return -1;
     }
 
     status = mosquitto_tls_insecure_set(cb->mosq, cb->insecure);
@@ -169,7 +169,7 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
             mosquitto_strerror(status));
       mosquitto_destroy(cb->mosq);
       cb->mosq = NULL;
-      return (-1);
+      return -1;
     }
   }
 
@@ -183,7 +183,7 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
 
     mosquitto_destroy(cb->mosq);
     cb->mosq = NULL;
-    return (-1);
+    return -1;
   }
 
   status = mosquitto_loop_start(cb->mosq);
@@ -195,14 +195,14 @@ static int wm_callback_init(wm_callback_t *cb) /* {{{ */
     (void)mosquitto_disconnect(cb->mosq);
     mosquitto_destroy(cb->mosq);
     cb->mosq = NULL;
-    return (-1);
+    return -1;
   }
 
   cb->connected = 1;
 
   wm_reset_buffer(cb);
 
-  return (0);
+  return 0;
 } /* }}} int wm_callback_init */
 
 static int wm_flush_nolock(cdtime_t timeout, wm_callback_t *cb) /* {{{ */
@@ -210,7 +210,7 @@ static int wm_flush_nolock(cdtime_t timeout, wm_callback_t *cb) /* {{{ */
   int status;
 
   DEBUG("write_mqtt plugin: wm_flush_nolock: timeout = %.3f; "
-        "send_buffer_fill = %zu;",
+        "send_buffer_fill = %" PRIsz ";",
         CDTIME_T_TO_DOUBLE(timeout), cb->send_buffer_fill);
 
   /* timeout == 0  => flush unconditionally */
@@ -219,12 +219,12 @@ static int wm_flush_nolock(cdtime_t timeout, wm_callback_t *cb) /* {{{ */
 
     now = cdtime();
     if ((cb->send_buffer_init_time + timeout) > now)
-      return (0);
+      return 0;
   }
 
   if (cb->send_buffer_fill <= 2) {
     cb->send_buffer_init_time = cdtime();
-    return (0);
+    return 0;
   }
 
   status = format_json_finalize(cb->send_buffer, &cb->send_buffer_fill,
@@ -233,13 +233,13 @@ static int wm_flush_nolock(cdtime_t timeout, wm_callback_t *cb) /* {{{ */
     ERROR("write_mqtt: wm_flush_nolock: "
           "format_json_finalize failed.");
     wm_reset_buffer(cb);
-    return (status);
+    return status;
   }
 
   status = wm_publish_nolock(cb, cb->send_buffer);
   wm_reset_buffer(cb);
 
-  return (status);
+  return status;
 } /* }}} wm_flush_nolock */
 
 static int wm_flush(cdtime_t timeout, /* {{{ */
@@ -249,7 +249,7 @@ static int wm_flush(cdtime_t timeout, /* {{{ */
   int status;
 
   if (user_data == NULL)
-    return (-EINVAL);
+    return -EINVAL;
 
   cb = user_data->data;
 
@@ -258,13 +258,13 @@ static int wm_flush(cdtime_t timeout, /* {{{ */
   if (wm_callback_init(cb) != 0) {
     ERROR("write_mqtt plugin: wm_callback_init failed.");
     pthread_mutex_unlock(&cb->send_lock);
-    return (-1);
+    return -1;
   }
 
   status = wm_flush_nolock(timeout, cb);
   pthread_mutex_unlock(&cb->send_lock);
 
-  return (status);
+  return status;
 } /* }}} int wm_flush */
 
 static void wm_callback_free(void *data) /* {{{ */
@@ -309,7 +309,7 @@ static int wm_write_json(const data_set_t *ds, const value_list_t *vl, /* {{{ */
   if (wm_callback_init(cb) != 0) {
     ERROR("write_mqtt plugin: wm_callback_init failed.");
     pthread_mutex_unlock(&cb->send_lock);
-    return (-1);
+    return -1;
   }
 
   status =
@@ -320,7 +320,7 @@ static int wm_write_json(const data_set_t *ds, const value_list_t *vl, /* {{{ */
     if (status != 0) {
       wm_reset_buffer(cb);
       pthread_mutex_unlock(&cb->send_lock);
-      return (status);
+      return status;
     }
 
     status =
@@ -329,18 +329,18 @@ static int wm_write_json(const data_set_t *ds, const value_list_t *vl, /* {{{ */
   }
   if (status != 0) {
     pthread_mutex_unlock(&cb->send_lock);
-    return (status);
+    return status;
   }
 
-  DEBUG("write_mqtt plugin: <%s> buffer %zu/%zu (%g%%)", cb->location,
-        cb->send_buffer_fill, cb->send_buffer_size,
+  DEBUG("write_mqtt plugin: <%s> buffer %" PRIsz "/%" PRIsz " (%g%%) \"%s\"",
+        cb->location, cb->send_buffer_fill, cb->send_buffer_size,
         100.0 * ((double)cb->send_buffer_fill) /
             ((double)cb->send_buffer_size));
 
   /* Check if we have enough space for this command. */
   pthread_mutex_unlock(&cb->send_lock);
 
-  return (0);
+  return 0;
 } /* }}} int wm_write_json */
 
 static int wm_write(const data_set_t *ds, const value_list_t *vl, /* {{{ */
@@ -349,12 +349,12 @@ static int wm_write(const data_set_t *ds, const value_list_t *vl, /* {{{ */
   int status;
 
   if (user_data == NULL)
-    return (-EINVAL);
+    return -EINVAL;
 
   cb = user_data->data;
 
   status = wm_write_json(ds, vl, cb);
-  return (status);
+  return status;
 } /* }}} int wm_write */
 
 static int wm_config_node(oconfig_item_t *ci) /* {{{ */
@@ -366,7 +366,7 @@ static int wm_config_node(oconfig_item_t *ci) /* {{{ */
   cb = calloc(1, sizeof(*cb));
   if (cb == NULL) {
     ERROR("write_mqtt plugin: calloc failed.");
-    return (-1);
+    return -1;
   }
 
   cb->port = WRITE_MQTT_DEFAULT_PORT;
@@ -377,13 +377,13 @@ static int wm_config_node(oconfig_item_t *ci) /* {{{ */
   status = cf_util_get_string(ci, &cb->name);
   if (status != 0) {
     wm_callback_free(cb);
-    return (status);
+    return status;
   }
 
   status = pthread_mutex_init(&cb->send_lock, /* attr = */ NULL);
   if (status != 0) {
     wm_callback_free(cb);
-    return (status);
+    return status;
   }
 
   C_COMPLAIN_INIT(&cb->complaint_cantpublish);
@@ -443,26 +443,28 @@ static int wm_config_node(oconfig_item_t *ci) /* {{{ */
 
   if (status != 0) {
     wm_callback_free(cb);
-    return (status);
+    return status;
   }
 
   if (cb->host == NULL) {
     ERROR("write_mqtt plugin: no Host defined for instance '%s'", cb->name);
     wm_callback_free(cb);
-    return (-1);
+    return -1;
   }
 
   /* Allocate the buffer. */
   cb->send_buffer = malloc(cb->send_buffer_size);
   if (cb->send_buffer == NULL) {
-    ERROR("write_mqtt plugin: malloc(%zu) failed.", cb->send_buffer_size);
+    ERROR("write_mqtt plugin: malloc(%" PRIsz ") failed.",
+          cb->send_buffer_size);
     wm_callback_free(cb);
-    return (-1);
+    return -1;
   }
+
   /* Nulls the buffer and sets ..._free and ..._fill. */
   wm_reset_buffer(cb);
 
-  ssnprintf(callback_name, sizeof(callback_name), "write_mqtt/%s", cb->name);
+  snprintf(callback_name, sizeof(callback_name), "write_mqtt/%s", cb->name);
   DEBUG("write_mqtt: Registering write callback '%s' with Host '%s'",
         callback_name, cb->host);
 
@@ -474,7 +476,7 @@ static int wm_config_node(oconfig_item_t *ci) /* {{{ */
                                                      .data = cb,
                                                  });
 
-  return (0);
+  return 0;
 } /* }}} int wm_config_node */
 
 static int wm_config(oconfig_item_t *ci) /* {{{ */
@@ -491,19 +493,19 @@ static int wm_config(oconfig_item_t *ci) /* {{{ */
     }
   }
 
-  return (0);
+  return 0;
 } /* }}} int wm_config */
 
 static int wm_init(void) /* {{{ */
 {
   mosquitto_lib_init();
-  return (0);
+  return 0;
 } /* }}} int wm_init */
 
 static int wm_shutdown(void) /* {{{ */
 {
   mosquitto_lib_cleanup();
-  return (0);
+  return 0;
 } /* }}} int wm_shutdown */
 
 void module_register(void) /* {{{ */

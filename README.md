@@ -42,7 +42,7 @@ Copy `src/write_mqtt.c` into the collectd source and add following lines to the 
     ```
     if BUILD_PLUGIN_WRITE_MQTT
     pkglib_LTLIBRARIES += write_mqtt.la
-    write_mqtt_la_SOURCES = write_mqtt.c
+    write_mqtt_la_SOURCES = src/write_mqtt.c
     write_mqtt_la_CPPFLAGS = $(AM_CPPFLAGS) $(BUILD_WITH_LIBMOSQUITTO_CPPFLAGS)
     write_mqtt_la_LDFLAGS = $(PLUGIN_LDFLAGS) $(BUILD_WITH_LIBMOSQUITTO_LDFLAGS)
     write_mqtt_la_LIBADD = $(BUILD_WITH_LIBMOSQUITTO_LIBS) \
